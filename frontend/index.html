@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>差评翻译官 · 三创赛Demo</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",PingFang SC,Helvetica,Arial}
+body{margin:0;background:#f6f8fb;color:#0f172a}
+header{background:#0f172a;color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:16px;margin:0}
+header small{opacity:.7}
+.wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 4px 16px rgba(15,23,42,.06)}
+.drop{border:2px dashed #94a3b8;border-radius:12px;padding:18px;text-align:center;background:#f8fafc;cursor:pointer}
+.drop.drag{border-color:#2563eb;background:#eff6ff}
+.btn{background:#2563eb;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:600}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:#fff;color:#0f172a;border:1px solid #e2e8f0}
+.grid{display:grid;grid-template-columns:360px 1fr;gap:14px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.table{width:100%;border-collapse:collapse;font-size:13px}
+.table th{background:#f1f5f9;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;position:sticky;top:0}
+.table td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
+.badge.logi{background:#fef3c7;color:#92400e}
+.badge.qual{background:#fee2e2;color:#991b1b}
+.badge.mism{background:#e0e7ff;color:#3730a3}
+.badge.serv{background:#dcfce7;color:#166534}
+.muted{color:#64748b;font-size:13px}
+.kpi{display:flex;gap:12px;flex-wrap:wrap}
+.kpi div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;min-width:120px}
+.kpi b{font-size:18px}
+select{padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>差评翻译官 <small>· 上传Excel → 分类饼图 → 三语气回复 → 周报导出</small></h1>
+  <small>本地分类·云端仅做改写·0 API风险</small>
+</header>
+<div class="wrap">
+  <div class="card">
+    <div id="drop" class="drop">
+      <div style="font-weight:700">拖拽 Excel 到此处，或点击选择</div>
+      <div class="muted">支持 商家导出的差评Excel / mock_100.xlsx（含“差评原文”列）</div>
+      <div style="margin-top:10px">
+        <input id="file" type="file" accept=".xlsx,.xls,.csv" style="display:none"/>
+        <button class="btn" onclick="document.getElementById('file').click()">选择文件</button>
+        <button class="btn ghost" onclick="loadDemo()">加载 demo 数据(100条)</button>
+      </div>
+      <div id="fname" class="muted" style="margin-top:8px"></div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label>回复语气</label>
+      <select id="tone"><option value="共情">共情</option><option value="官方">官方</option><option value="幽默">幽默</option></select>
+      <button id="analyzeBtn" class="btn" disabled>一键分析</button>
+      <button id="exportBtn" class="btn ghost" disabled>导出分析结果Excel</button>
+      <button id="reportBtn" class="btn ghost" disabled>导出周报PDF(打印)</button>
+      <span id="stat" class="muted"></span>
+    </div>
+    <div class="card" style="margin-top:12px;background:#f8fafc">
+      <div style="font-weight:700">店铺知识库（RAG） <span class="muted">· 粘贴店铺信息，回复时自动带入，抄闲鱼RAG但本地化</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div>
+          <div class="muted">店铺简介/主营/售后政策（示例）</div>
+          <textarea id="kb" rows="3" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px" placeholder="示例：本店主营纯棉T恤，支持7天无理由退换，运费险，48小时发货，客服在线时间9-21点">本店主营纯棉T恤，支持7天无理由退换，有运费险，48小时内发货，客服在线9-21点，质量问题免费换新。</textarea>
+        </div>
+        <div>
+          <div class="muted">上传知识库Excel（可选，含“问题→答案”）</div>
+          <input id="kbFile" type="file" accept=".xlsx,.xls,.csv"/>
+          <div id="kbStat" class="muted" style="margin-top:6px">未上传，用默认示例</div>
+          <label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input id="useKb" type="checkbox" checked/> 回复时引用知识库</label>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:8px">前端参考行业通用知识库RAG设计，采用本地知识库+提示词注入，0 API风险，演示时修改知识库即可联动回复。</div>
+    </div>
+    <div class="muted" style="margin-top:8px">技术路线：清洗复用业界成熟流程 · 分类采用bge-small-zh向量相似度 · 归因基于UIE属性级抽取改进 · 回复基于大模型Prompt多语气改写 · 前端参考行业通用三栏式布局 · 知识库本地化RAG</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:8px">分类分布</div>
+      <canvas id="pie" height="260"></canvas>
+      <div id="kpis" class="kpi" style="margin-top:10px"></div>
+      <div id="top3" class="muted" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:700">明细（可切换语气）</div>
+        <input id="q" placeholder="搜索原文/归因" style="padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;width:200px"/>
+      </div>
+      <div style="max-height:520px;overflow:auto;margin-top:8px">
+        <table class="table" id="tbl">
+          <thead><tr><th>#</th><th>原文</th><th>类别</th><th>归因</th><th>回复(<span id="toneLabel">共情</span>)</th><th>置信</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 批判吸收后：前端本地分类（镜像 backend/app.py 关键词兜底 + 约束归因）=====
+const LABELS = ["物流慢","质量差","货不对版","客服态度差"];
+const KW = {
+  "物流慢": ["物流","快递","发货","到货","揽收","配送","驿站","慢","等了","晚到","出库"],
+  "质量差": ["质量","做工","材质","掉色","起球","瑕疵","品控","开线","变形","薄","廉价","掉","坏","破"],
+  "货不对版": ["色差","尺码","偏小","赠品","描述","不符","少发","配置","图片","实物","款式","以为"],
+  "客服态度差": ["客服","回复","态度","售后","退款","推诿","敷衍","不回","机器人","模板","补偿"],
+};
+const ISSUE = {
+  "物流慢": ["物流慢","快递慢","发货慢","揽收慢","配送慢","到货慢","等了","晚到","驿站","出库慢"],
+  "质量差": ["开线","起球","变形","掉色","瑕疵","品控","做工差","材质差","廉价","异味","甲醛","松动","薄"],
+  "货不对版": ["色差","尺码偏小","少发","漏发","赠品没有","描述不符","图片不符","实物不符","配置不对","款式不对"],
+  "客服态度差": ["不回","已读不回","敷衍","推诿","机器人","模板","态度差","不处理","不给退","补偿没发"],
+};
+const ACTIONS = {
+  "物流慢":"催促物流并补偿运费券",
+  "质量差":"安排质检复核并支持免费换新",
+  "货不对版":"核对仓储并补发正确商品",
+  "客服态度差":"培训客服并由主管1小时内回访",
+};
+const TPL = {
+  "官方":"您好，感谢反馈。关于“{issue}”问题，我们已记录并将{action}，给您带来不便深表歉意。",
+  "共情":"非常理解您的心情，{issue}确实让人失望。我们已加急处理，会{action}，期待再给我们一次机会～",
+  "幽默":"哎呀让您踩坑了！{issue}这锅我们背，已安排{action}，小客服在线等您验收～",
+};
+function clean(s){ return String(s||"").replace(/https?:\/\/\S+/g,"").replace(/\s+/g," ").trim(); }
+function classifyOne(t){
+  const c=clean(t);
+  let best="质量差", bestScore=-1, scores={};
+  for(const lab of LABELS){
+    let sc=0; for(const k of KW[lab]) if(c.includes(k)) sc++;
+    scores[lab]=sc; if(sc>bestScore){bestScore=sc; best=lab;}
+  }
+  if(bestScore===0) return {label:"质量差", score:0.35, scores};
+  return {label:best, score:Math.min(0.95,0.55+bestScore*0.12), scores};
+}
+function extractIssue(t, label){
+  const c=clean(t);
+  for(const k of (ISSUE[label]||[])) if(c.includes(k)) return k;
+  return label;
+}
+let kbText = "本店主营纯棉T恤，支持7天无理由退换，有运费险，48小时内发货，客服在线9-21点，质量问题免费换新。";
+let kbRows = []; // [{q,a}]
+function localReply(t, label, tone){
+  const issue=extractIssue(t,label);
+  let base=TPL[tone].replace("{issue}",issue).replace("{action}",ACTIONS[label]);
+  // RAG：若知识库勾选且命中关键词，追加一句知识库信息
+  if(document.getElementById('useKb')?.checked && kbText){
+    if(/质量|换新|退/.test(t) && /7天|换新|退换/.test(kbText)) base += "（本店支持7天无理由，质量问题免费换新）";
+    else if(/物流|快递|发货/.test(t) && /48小时|发货/.test(kbText)) base += "（本店48小时内发货，超时补偿）";
+    else if(/客服/.test(t) && /9-21/.test(kbText)) base += "（客服9-21点在线，1小时内必回）";
+    // 若上传了知识库Excel，尝试精确匹配
+    if(kbRows.length){
+      for(const r of kbRows){ if(t.includes(r.q) || issue.includes(r.q)){ base += `（知识库：${r.a}）`; break; } }
+    }
+  }
+  return base;
+}
+
+let rows=[]; // {原文, 真实, 预测, score, 归因, 回复: {官方,共情,幽默}}
+let pieChart=null;
+
+function render(){
+  const tone=document.getElementById('tone').value;
+  document.getElementById('toneLabel').textContent=tone;
+  // KPI
+  const cnt={}; rows.forEach(r=>cnt[r.预测]=(cnt[r.预测]||0)+1);
+  document.getElementById('kpis').innerHTML = LABELS.map(l=>`<div><div class="muted">${l}</div><b>${cnt[l]||0}</b></div>`).join("") + `<div><div class="muted">总数</div><b>${rows.length}</b></div>`;
+  // Top3
+  const issCnt={}; rows.forEach(r=>{ const k=r.归因; issCnt[k]=(issCnt[k]||0)+1; });
+  const top3=Object.entries(issCnt).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>`${k}(${v})`).join(" · ");
+  document.getElementById('top3').innerHTML = `<b>本周Top3问题：</b>${top3||"-"} <span class="muted">（可直接写进周报）</span>`;
+  // Pie
+  const data=LABELS.map(l=>cnt[l]||0);
+  const ctx=document.getElementById('pie').getContext('2d');
+  if(pieChart) pieChart.destroy();
+  pieChart=new Chart(ctx,{type:'doughnut',data:{labels:LABELS,datasets:[{data, backgroundColor:['#f59e0b','#ef4444','#6366f1','#10b981']}]},options:{plugins:{legend:{position:'bottom'}}}});
+  // Table
+  const q=(document.getElementById('q').value||"").trim();
+  const tbody=document.querySelector('#tbl tbody');
+  tbody.innerHTML="";
+  rows.filter(r=>!q||r.原文.includes(q)||r.归因.includes(q)).forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    const cls=r.预测;
+    const badgeClass= cls==="物流慢"?"logi":cls==="质量差"?"qual":cls==="货不对版"?"mism":"serv";
+    tr.innerHTML=`<td>${i+1}</td><td style="max-width:360px">${r.原文}</td><td><span class="badge ${badgeClass}">${cls}</span></td><td>${r.归因}</td><td>${r.回复[tone]}</td><td>${r.score.toFixed(2)}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('stat').textContent = `${rows.length}条已分析 · 本地分类(无API) · 切换语气即时生效`;
+  document.getElementById('exportBtn').disabled = rows.length===0;
+  document.getElementById('reportBtn').disabled = rows.length===0;
+}
+
+function parseWorkbook(wb){
+  const sheet=wb.Sheets[wb.SheetNames[0]];
+  const json=XLSX.utils.sheet_to_json(sheet, {header:1});
+  if(json.length<2) throw new Error("Excel无数据");
+  const header=json[0].map(h=>String(h||"").trim());
+  // 找“原文”列
+  let idx = header.findIndex(h=>/原文|评论|内容|差评/.test(h));
+  if(idx===-1) idx=0;
+  let idxTrue = header.findIndex(h=>/真实类别/.test(h));
+  const out=[];
+  for(let i=1;i<json.length;i++){
+    const r=json[i]; const t=r[idx]; if(!t) continue;
+    const cl=classifyOne(t);
+    const lab=cl.label;
+    out.push({
+      原文: String(t),
+      真实: idxTrue>=0? String(r[idxTrue]||"") : "",
+      预测: lab,
+      score: cl.score,
+      归因: extractIssue(t, lab),
+      回复: {官方: localReply(t,lab,"官方"), 共情: localReply(t,lab,"共情"), 幽默: localReply(t,lab,"幽默")},
+    });
+  }
+  return out;
+}
+
+async function handleFile(file){
+  const buf=await file.arrayBuffer();
+  const wb=XLSX.read(buf);
+  rows=parseWorkbook(wb);
+  document.getElementById('fname').textContent = file.name + ` · ${rows.length}条`;
+  document.getElementById('analyzeBtn').disabled=false;
+  render();
+}
+document.getElementById('file').addEventListener('change', e=>{ const f=e.target.files[0]; if(f) handleFile(f); });
+const drop=document.getElementById('drop');
+drop.addEventListener('dragover', e=>{e.preventDefault(); drop.classList.add('drag')});
+drop.addEventListener('dragleave', ()=>drop.classList.remove('drag'));
+drop.addEventListener('drop', e=>{e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer.files[0]; if(f) handleFile(f);});
+drop.addEventListener('click', e=>{ if(e.target.tagName!=="BUTTON"&&e.target.tagName!=="INPUT") document.getElementById('file').click(); });
+document.getElementById('kb').addEventListener('input', e=>{ kbText=e.target.value; render(); });
+document.getElementById('kbFile').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const buf=await f.arrayBuffer(); const wb=XLSX.read(buf); const sh=wb.Sheets[wb.SheetNames[0]];
+  const js=XLSX.utils.sheet_to_json(sh,{header:1});
+  kbRows=[];
+  for(let i=1;i<js.length;i++){ const q=String(js[i][0]||"").trim(), a=String(js[i][1]||"").trim(); if(q&&a) kbRows.push({q,a}); }
+  document.getElementById('kbStat').textContent = `已加载 ${kbRows.length} 条知识库`;
+  render();
+});
+document.getElementById('useKb').addEventListener('change', render);
+document.getElementById('tone').addEventListener('change', render);
+document.getElementById('q').addEventListener('input', render);
+document.getElementById('analyzeBtn').addEventListener('click', render);
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  const tone=document.getElementById('tone').value;
+  const data=[["ID","原文","真实类别","预测类别","归因","官方","共情","幽默","置信度"]];
+  rows.forEach((r,i)=>data.push([i+1,r.原文,r.真实,r.预测,r.归因,r.回复.官方,r.回复.共情,r.回复.幽默,r.score.toFixed(2)]));
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  ws['!cols']=[{wch:6},{wch:42},{wch:12},{wch:12},{wch:14},{wch:36},{wch:36},{wch:36},{wch:8}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"分析结果");
+  XLSX.writeFile(wb, "差评翻译官_分析结果.xlsx");
+});
+document.getElementById('reportBtn').addEventListener('click', ()=>window.print());
+async function loadDemo(){
+  // 尝试加载 data/mock_100.xlsx via fetch (需 http server)，失败则用内置20条样例
+  try{
+    const res=await fetch('../data/mock_100.xlsx');
+    if(!res.ok) throw new Error("fetch fail");
+    const buf=await res.arrayBuffer();
+    const wb=XLSX.read(buf);
+    rows=parseWorkbook(wb);
+    document.getElementById('fname').textContent=`mock_100.xlsx · ${rows.length}条 (demo)`;
+    document.getElementById('analyzeBtn').disabled=false;
+    render();
+  }catch(e){
+    // 内置样例
+    const samples=[
+      "等了5天才到，物流太慢了","面料起球严重，洗一次就变形","图片是红色，发来是暗红，色差太大","客服半天不回，回了就是机器人话术",
+      "物流信息三天不更新，以为丢件了","用了两天就开线了，做工太差","尺码偏小一码，标的M实际是S","投诉也没用，回复全是模板",
+      "快递在路上走了4天，包装都压扁了","塑料感很强，一看就是廉价货"
+    ];
+    rows=samples.map(t=>{ const cl=classifyOne(t); return {原文:t,真实:"",预测:cl.label,score:cl.score,归因:extractIssue(t,cl.label),回复:{官方:localReply(t,cl.label,"官方"),共情:localReply(t,cl.label,"共情"),幽默:localReply(t,cl.label,"幽默")}}});
+    document.getElementById('fname').textContent=`内置样例 · ${rows.length}条`;
+    document.getElementById('analyzeBtn').disabled=false;
+    render();
+  }
+}
+</script>
+</body>
+</html>

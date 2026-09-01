@@ -1,0 +1,6 @@
+fastapi==0.115.*
+uvicorn==0.34.*
+sentence-transformers==5.*
+openpyxl==3.*
+python-multipart==0.0.9
+openai==1.*
