@@ -66,14 +66,20 @@ KEYWORD_FALLBACK = {
 _model = None
 _label_emb = None
 
+LABELS_DESC = [
+    "物流慢，快递发货配送到货慢，等很久才到",
+    "质量差，做工材质差，瑕疵品控问题，开线起球掉色",
+    "货不对版，色差尺码不对，少发漏发，描述图片与实物不符",
+    "客服态度差，客服不回敷衍推诿，机器人模板，态度差",
+]
 def get_model():
     global _model, _label_emb
     if not HAS_ST:
         return None, None
     if _model is None:
-        # 首次加载较慢，带重试
         _model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
-        _label_emb = _model.encode(LABELS, normalize_embeddings=True)
+        # 用描述句而非短标签，提升向量区分度（扬长：bge语义，避短：短标签太泛）
+        _label_emb = _model.encode(LABELS_DESC, normalize_embeddings=True)
     return _model, _label_emb
 
 def classify_keyword(text: str) -> Dict:
@@ -96,44 +102,60 @@ def classify(text: str) -> Dict:
     c = clean(text)
     if not c:
         return {"label": "质量差", "score": 0.3, "all_scores": {}, "method": "empty"}
+    # 混合策略：bge语义 + 关键词校正，扬长避短
+    kw = classify_keyword(c)
     if not HAS_ST:
-        return classify_keyword(c)
+        return kw
     try:
         model, label_emb = get_model()
         emb = model.encode(c, normalize_embeddings=True)
         sims = (emb @ label_emb.T).tolist()
         idx = int(max(range(len(sims)), key=lambda i: sims[i]))
-        return {"label": LABELS[idx], "score": float(sims[idx]), "all_scores": dict(zip(LABELS, sims)), "method": "bge"}
+        bge_label = LABELS[idx]
+        bge_score = float(sims[idx])
+        # 混合：若bge高置信(>0.62)用bge，否则用关键词；若二者一致则高置信
+        if bge_label == kw["label"]:
+            return {"label": bge_label, "score": max(bge_score, kw["score"]), "all_scores": dict(zip(LABELS, sims)), "method": "hybrid-agree"}
+        if bge_score >= 0.62:
+            return {"label": bge_label, "score": bge_score, "all_scores": dict(zip(LABELS, sims)), "method": "bge"}
+        else:
+            return kw
     except Exception as e:
-        # 模型异常回退
-        r = classify_keyword(c)
+        r = kw
         r["error"] = str(e)
         return r
 
 def classify_batch(texts: List[str], batch_size: int = 32) -> List[Dict]:
-    """批量分类，带去重优化与bge批量加速"""
+    """批量分类：bge描述句 + 关键词混合，扬长避短"""
     if not texts:
         return []
-    # 先清洗去重，减少模型调用
     cleaned = [clean(t) for t in texts]
-    # bge批量
-    if HAS_ST:
-        try:
-            model, label_emb = get_model()
-            # 按batch编码，防止OOM
-            results = []
-            for i in range(0, len(cleaned), batch_size):
-                batch = cleaned[i:i+batch_size]
-                embs = model.encode(batch, normalize_embeddings=True)
-                sims_batch = (embs @ label_emb.T)
-                for j, sims in enumerate(sims_batch):
-                    idx = int(np.argmax(sims))
-                    results.append({"text": texts[i+j], "clean": batch[j], "label": LABELS[idx], "score": float(sims[idx]), "all_scores": dict(zip(LABELS, sims.tolist())), "method": "bge"})
-            return results
-        except Exception:
-            pass
-    # 兜底逐条关键词
-    return [{"text": t, "clean": clean(t), **classify_keyword(t)} for t in texts]
+    # 先算关键词作参照
+    kw_list = [classify_keyword(c) for c in cleaned]
+    if not HAS_ST:
+        return [{"text": texts[i], "clean": cleaned[i], **kw_list[i]} for i in range(len(texts))]
+    try:
+        model, label_emb = get_model()
+        results = []
+        for i in range(0, len(cleaned), batch_size):
+            batch = cleaned[i:i+batch_size]
+            embs = model.encode(batch, normalize_embeddings=True)
+            sims_batch = (embs @ label_emb.T)
+            for j, sims in enumerate(sims_batch):
+                idx = int(np.argmax(sims))
+                bge_label = LABELS[idx]
+                bge_score = float(sims[idx])
+                kw = kw_list[i+j]
+                # 混合：一致则高置信，否则bge>0.62用bge，否则关键词
+                if bge_label == kw["label"]:
+                    results.append({"text": texts[i+j], "clean": batch[j], "label": bge_label, "score": max(bge_score, kw["score"]), "all_scores": dict(zip(LABELS, sims.tolist())), "method": "hybrid-agree"})
+                elif bge_score >= 0.62:
+                    results.append({"text": texts[i+j], "clean": batch[j], "label": bge_label, "score": bge_score, "all_scores": dict(zip(LABELS, sims.tolist())), "method": "bge"})
+                else:
+                    results.append({"text": texts[i+j], "clean": batch[j], **kw})
+        return results
+    except Exception:
+        return [{"text": texts[i], "clean": cleaned[i], **kw_list[i]} for i in range(len(texts))]
 
 # ========== 3. 归因层：基于 UIE 的属性级抽取思路改进 ==========
 ISSUE_KEYWORDS = {

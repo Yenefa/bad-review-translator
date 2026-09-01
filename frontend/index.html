@@ -4,56 +4,104 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>差评翻译官 · 三创赛Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",PingFang SC,Helvetica,Arial}
-body{margin:0;background:#f6f8fb;color:#0f172a}
-header{background:#0f172a;color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
-header h1{font-size:16px;margin:0}
-header small{opacity:.7}
-.wrap{max-width:1100px;margin:18px auto;padding:0 14px}
-.card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 4px 16px rgba(15,23,42,.06)}
-.drop{border:2px dashed #94a3b8;border-radius:12px;padding:18px;text-align:center;background:#f8fafc;cursor:pointer}
-.drop.drag{border-color:#2563eb;background:#eff6ff}
-.btn{background:#2563eb;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:600}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.btn.ghost{background:#fff;color:#0f172a;border:1px solid #e2e8f0}
-.grid{display:grid;grid-template-columns:360px 1fr;gap:14px}
+:root{
+  --bg:#f8f9fc;--card:#fff;--border:#e8ecf1;--text:#1a1d26;--muted:#6b7280;
+  --header:#111827;--drop:#f9fafb;--th:#f3f4f6;--input:#fff;
+  --accent:#6366f1;--accent-hover:#4f46e5;--accent-light:#eef2ff;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow-md:0 4px 12px rgba(0,0,0,.06);--shadow-lg:0 8px 24px rgba(0,0,0,.08);
+  --radius:12px;--radius-lg:16px;
+}
+[data-theme="dark"]{
+  --bg:#0a0e1a;--card:#131825;--border:#1e2a3a;--text:#e2e8f0;--muted:#8896ab;
+  --header:#0a0e1a;--drop:#0f1520;--th:#131a28;--input:#0f1520;
+  --accent:#818cf8;--accent-hover:#6366f1;--accent-light:#1e1b4b;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.2);--shadow-md:0 4px 12px rgba(0,0,0,.3);--shadow-lg:0 8px 24px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",PingFang SC,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);transition:background .3s,color .3s;line-height:1.5;-webkit-font-smoothing:antialiased}
+header{background:var(--header);color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.06)}
+header h1{font-size:17px;font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+header h1::before{content:'';display:inline-block;width:8px;height:8px;background:var(--accent);border-radius:50%;box-shadow:0 0 8px var(--accent)}
+header small{opacity:.55;font-size:12px;font-weight:400}
+.wrap{max-width:1120px;margin:24px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:16px;box-shadow:var(--shadow-sm);transition:box-shadow .2s,border-color .2s}
+.card:hover{box-shadow:var(--shadow-md)}
+.drop{border:2px dashed var(--border);border-radius:var(--radius-lg);padding:28px 20px;text-align:center;background:var(--drop);cursor:pointer;transition:all .25s ease;position:relative;overflow:hidden}
+.drop::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 120%,var(--accent-light),transparent 70%);opacity:0;transition:opacity .3s}
+.drop:hover::before,.drop.drag::before{opacity:1}
+.drop:hover,.drop.drag{border-color:var(--accent);transform:translateY(-1px)}
+.drop.drag{background:var(--accent-light)}
+.drop>div{position:relative;z-index:1}
+.btn{background:var(--accent);color:#fff;border:0;border-radius:var(--radius);padding:10px 18px;cursor:pointer;font-weight:600;font-size:13px;font-family:inherit;transition:all .2s ease;box-shadow:0 1px 3px rgba(99,102,241,.3)}
+.btn:hover{background:var(--accent-hover);transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,.35)}
+.btn:active{transform:translateY(0);box-shadow:0 1px 2px rgba(99,102,241,.2)}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+.btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light);box-shadow:var(--shadow-md)}
+.grid{display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start}
 @media(max-width:900px){.grid{grid-template-columns:1fr}}
-.table{width:100%;border-collapse:collapse;font-size:13px}
-.table th{background:#f1f5f9;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;position:sticky;top:0}
-.table td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
-.badge.logi{background:#fef3c7;color:#92400e}
-.badge.qual{background:#fee2e2;color:#991b1b}
-.badge.mism{background:#e0e7ff;color:#3730a3}
-.badge.serv{background:#dcfce7;color:#166534}
-.muted{color:#64748b;font-size:13px}
+.table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.table th{background:var(--th);text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top;transition:background .15s}
+.table tbody tr:hover td{background:var(--accent-light)}
+.table tbody tr:last-child td{border-bottom:none}
+.badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.02em}
+.badge.logi{background:linear-gradient(135deg,#fef3c7,#fde68a);color:#92400e;box-shadow:0 1px 4px rgba(245,158,11,.15)}
+.badge.qual{background:linear-gradient(135deg,#fee2e2,#fecaca);color:#991b1b;box-shadow:0 1px 4px rgba(239,68,68,.15)}
+.badge.mism{background:linear-gradient(135deg,#e0e7ff,#c7d2fe);color:#3730a3;box-shadow:0 1px 4px rgba(99,102,241,.15)}
+.badge.serv{background:linear-gradient(135deg,#dcfce7,#bbf7d0);color:#166534;box-shadow:0 1px 4px rgba(16,185,129,.15)}
+.muted{color:var(--muted);font-size:13px}
 .kpi{display:flex;gap:12px;flex-wrap:wrap}
-.kpi div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;min-width:120px}
-.kpi b{font-size:18px}
-select{padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px}
+.kpi div{background:var(--drop);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;min-width:110px;transition:all .2s}
+.kpi div:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.kpi b{font-size:18px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,var(--accent),#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+select,textarea,input[type="text"],input:not([type="file"]):not([type="checkbox"]){padding:9px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input);color:var(--text);font-family:inherit;font-size:13px;transition:border-color .2s,box-shadow .2s;outline:none}
+select:focus,textarea:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+textarea::placeholder{color:var(--muted)}
+input[type="file"]{background:var(--input);color:var(--text);border:1px solid var(--border);padding:8px;border-radius:var(--radius);width:100%;font-size:13px;font-family:inherit}
+input[type="file"]::file-selector-button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:7px 14px;margin-right:10px;cursor:pointer;font-weight:600;font-size:12px;font-family:inherit;transition:all .2s}
+input[type="file"]::file-selector-button:hover{background:var(--accent-hover)}
+label{font-size:13px;font-weight:500;color:var(--muted)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.wrap .card{animation:fadeIn .4s ease both}
+.wrap .card:nth-child(2){animation-delay:.05s}
+.wrap .grid .card:nth-child(1){animation-delay:.1s}
+.wrap .grid .card:nth-child(2){animation-delay:.15s}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+.theme-btn{padding:6px 12px!important;font-size:12px!important;background:rgba(255,255,255,.1)!important;color:#fff!important;border:1px solid rgba(255,255,255,.15)!important;backdrop-filter:blur(8px)}
+.theme-btn:hover{background:rgba(255,255,255,.18)!important;border-color:rgba(255,255,255,.25)!important}
 </style>
 </head>
 <body>
 <header>
   <h1>差评翻译官 <small>· 上传Excel → 分类饼图 → 三语气回复 → 周报导出</small></h1>
-  <small>本地分类·云端仅做改写·0 API风险</small>
+  <div style="display:flex;gap:10px;align-items:center">
+    <small>本地分类·云端仅做改写·0 API风险</small>
+    <button id="themeBtn" class="btn ghost theme-btn" onclick="toggleTheme()">🌙 暗色</button>
+  </div>
 </header>
 <div class="wrap">
   <div class="card">
     <div id="drop" class="drop">
-      <div style="font-weight:700">拖拽 Excel 到此处，或点击选择</div>
-      <div class="muted">支持 商家导出的差评Excel / mock_100.xlsx（含“差评原文”列）</div>
-      <div style="margin-top:10px">
+      <div style="font-weight:700;font-size:15px;margin-bottom:4px">拖拽 Excel 到此处，或点击选择</div>
+      <div class="muted">支持 商家导出的差评Excel / mock_100.xlsx（含"差评原文"列）</div>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:center">
         <input id="file" type="file" accept=".xlsx,.xls,.csv" style="display:none"/>
         <button class="btn" onclick="document.getElementById('file').click()">选择文件</button>
         <button class="btn ghost" onclick="loadDemo()">加载 demo 数据(100条)</button>
       </div>
-      <div id="fname" class="muted" style="margin-top:8px"></div>
+      <div id="fname" class="muted" style="margin-top:10px"></div>
     </div>
-    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <label>回复语气</label>
       <select id="tone"><option value="共情">共情</option><option value="官方">官方</option><option value="幽默">幽默</option></select>
       <button id="analyzeBtn" class="btn" disabled>一键分析</button>
@@ -61,38 +109,38 @@ select{padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px}
       <button id="reportBtn" class="btn ghost" disabled>导出周报PDF(打印)</button>
       <span id="stat" class="muted"></span>
     </div>
-    <div class="card" style="margin-top:12px;background:#f8fafc">
-      <div style="font-weight:700">店铺知识库（RAG） <span class="muted">· 粘贴店铺信息，回复时自动带入，抄闲鱼RAG但本地化</span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+    <div class="card" style="margin-top:14px;background:var(--accent-light);border:1px solid var(--accent)">
+      <div style="font-weight:700;display:flex;align-items:center;gap:8px">🏪 店铺知识库（RAG） <span style="background:var(--accent);color:#fff;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700">演示亮点</span> <span class="muted">· 粘贴店铺信息，回复时自动带入，三创赛加分项</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
         <div>
-          <div class="muted">店铺简介/主营/售后政策（示例）</div>
-          <textarea id="kb" rows="3" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px" placeholder="示例：本店主营纯棉T恤，支持7天无理由退换，运费险，48小时发货，客服在线时间9-21点">本店主营纯棉T恤，支持7天无理由退换，有运费险，48小时内发货，客服在线9-21点，质量问题免费换新。</textarea>
+          <div class="muted" style="margin-bottom:4px">店铺简介/主营/售后政策（示例）</div>
+          <textarea id="kb" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius)" placeholder="示例：本店主营纯棉T恤，支持7天无理由退换，运费险，48小时发货，客服在线时间9-21点">本店主营纯棉T恤，支持7天无理由退换，有运费险，48小时内发货，客服在线9-21点，质量问题免费换新。</textarea>
         </div>
         <div>
-          <div class="muted">上传知识库Excel（可选，含“问题→答案”）</div>
+          <div class="muted" style="margin-bottom:4px">上传知识库Excel（可选，含"问题→答案"）</div>
           <input id="kbFile" type="file" accept=".xlsx,.xls,.csv"/>
-          <div id="kbStat" class="muted" style="margin-top:6px">未上传，用默认示例</div>
-          <label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input id="useKb" type="checkbox" checked/> 回复时引用知识库</label>
+          <div id="kbStat" class="muted" style="margin-top:8px">未上传，用默认示例</div>
+          <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer"><input id="useKb" type="checkbox" checked style="accent-color:var(--accent)"/> 回复时引用知识库</label>
         </div>
       </div>
-      <div class="muted" style="margin-top:8px">前端参考行业通用知识库RAG设计，采用本地知识库+提示词注入，0 API风险，演示时修改知识库即可联动回复。</div>
+      <div class="muted" style="margin-top:10px">前端参考行业通用知识库RAG设计，采用本地知识库+提示词注入，0 API风险，演示时修改知识库即可联动回复。</div>
     </div>
-    <div class="muted" style="margin-top:8px">技术路线：清洗复用业界成熟流程 · 分类采用bge-small-zh向量相似度 · 归因基于UIE属性级抽取改进 · 回复基于大模型Prompt多语气改写 · 前端参考行业通用三栏式布局 · 知识库本地化RAG</div>
+    <div class="muted" style="margin-top:10px">技术路线：清洗复用业界成熟流程 · 分类采用bge-small-zh向量相似度 · 归因基于UIE属性级抽取改进 · 回复基于大模型Prompt多语气改写 · 前端参考行业通用三栏式布局 · 知识库本地化RAG</div>
   </div>
 
   <div class="grid">
-    <div class="card">
-      <div style="font-weight:700;margin-bottom:8px">分类分布</div>
-      <canvas id="pie" height="260"></canvas>
-      <div id="kpis" class="kpi" style="margin-top:10px"></div>
-      <div id="top3" class="muted" style="margin-top:10px"></div>
+    <div class="card" style="padding:14px">
+      <div style="font-weight:700;margin-bottom:6px;font-size:15px">分类分布</div>
+      <canvas id="pie" height="190"></canvas>
+      <div id="kpis" class="kpi" style="margin-top:10px;gap:8px"></div>
+      <div id="top3" class="muted" style="margin-top:8px;font-size:12px"></div>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-weight:700">明细（可切换语气）</div>
-        <input id="q" placeholder="搜索原文/归因" style="padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;width:200px"/>
+        <div style="font-weight:700;font-size:15px">明细（可切换语气）</div>
+        <input id="q" placeholder="搜索原文/归因" style="padding:8px 14px;border:1px solid var(--border);border-radius:var(--radius);width:220px;font-size:13px"/>
       </div>
-      <div style="max-height:520px;overflow:auto;margin-top:8px">
+      <div style="max-height:520px;overflow:auto;margin-top:10px">
         <table class="table" id="tbl">
           <thead><tr><th>#</th><th>原文</th><th>类别</th><th>归因</th><th>回复(<span id="toneLabel">共情</span>)</th><th>置信</th></tr></thead>
           <tbody></tbody>
@@ -201,7 +249,7 @@ function parseWorkbook(wb){
   const json=XLSX.utils.sheet_to_json(sheet, {header:1});
   if(json.length<2) throw new Error("Excel无数据");
   const header=json[0].map(h=>String(h||"").trim());
-  // 找“原文”列
+  // 找"原文"列
   let idx = header.findIndex(h=>/原文|评论|内容|差评/.test(h));
   if(idx===-1) idx=0;
   let idxTrue = header.findIndex(h=>/真实类别/.test(h));
@@ -260,6 +308,14 @@ document.getElementById('exportBtn').addEventListener('click', ()=>{
   XLSX.writeFile(wb, "差评翻译官_分析结果.xlsx");
 });
 document.getElementById('reportBtn').addEventListener('click', ()=>window.print());
+function toggleTheme(){
+  const cur=document.documentElement.getAttribute('data-theme');
+  const next=cur==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  document.getElementById('themeBtn').textContent = next==='dark'?'☀️ 亮色':'🌙 暗色';
+}
+(function(){ const saved=localStorage.getItem('theme'); if(saved) { document.documentElement.setAttribute('data-theme', saved); const btn=document.getElementById('themeBtn'); if(btn) btn.textContent=saved==='dark'?'☀️ 亮色':'🌙 暗色'; } })();
 async function loadDemo(){
   // 尝试加载 data/mock_100.xlsx via fetch (需 http server)，失败则用内置20条样例
   try{
