@@ -1,5 +1,7 @@
 import sys
-sys.path.insert(0, r'C:\Users\fuker\Desktop\workspace\差评翻译官')
+from pathlib import Path
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 from backend.app import clean, classify, classify_batch, extract_issue, build_prompt, generate_replies, LABELS
 
 def test_clean():

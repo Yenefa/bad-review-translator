@@ -11,7 +11,8 @@ from sklearn.metrics import accuracy_score, f1_score, classification_report, con
 from sentence_transformers import SentenceTransformer
 
 # 1. 读 6k
-p = pathlib.Path(r'C:\Users\fuker\Desktop\workspace\差评翻译官\data\sample_6k.csv')
+ROOT = pathlib.Path(__file__).resolve().parent
+p = ROOT / "data" / "sample_6k.csv"
 df = pd.read_csv(p, encoding='utf-8-sig')
 print(f"loaded {len(df)} {Counter(df['label'])}")
 # 2. 分层 80/20
@@ -41,15 +42,15 @@ print("混淆矩阵")
 print(confusion_matrix(y_test, y_pred, labels=['物流慢','质量差','货不对版','客服态度差']))
 
 # 4. 保存分类头
-import pickle, pathlib
-out = pathlib.Path(r'C:\Users\fuker\Desktop\workspace\差评翻译官\backend\bge_classifier.pkl')
+import pickle
+out = ROOT / "backend" / "bge_classifier.pkl"
 with open(out, 'wb') as f:
     pickle.dump(clf, f)
 print(f"saved classifier {out} {out.stat().st_size} bytes")
 
-# 5. 在 mock_100 上验证，证明96%+可写进论文
+# 5. 在 mock_100 上验证
 import openpyxl
-mock_p = pathlib.Path(r'C:\Users\fuker\Desktop\workspace\差评翻译官\data\mock_100.xlsx')
+mock_p = ROOT / "data" / "mock_100.xlsx"
 wb = openpyxl.load_workbook(mock_p)
 ws = wb.active
 rows = list(ws.iter_rows(values_only=True))
@@ -62,7 +63,7 @@ pred_mock = clf.predict(X_mock)
 acc_mock = accuracy_score(trues, pred_mock)
 print(f"mock_100 准确率 {acc_mock:.4f} (用6k训的头在100条上)")
 # 写出微调版结果
-out_xlsx = pathlib.Path(r'C:\Users\fuker\Desktop\workspace\差评翻译官\data\mock_100_微调版.xlsx')
+out_xlsx = ROOT / "data" / "mock_100_微调版.xlsx"
 wb2 = openpyxl.Workbook()
 ws2 = wb2.active
 ws2.title = '微调96%'
