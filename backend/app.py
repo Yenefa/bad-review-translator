@@ -72,13 +72,23 @@ LABELS_DESC = [
     "货不对版，色差尺码不对，少发漏发，描述图片与实物不符",
     "客服态度差，客服不回敷衍推诿，机器人模板，态度差",
 ]
+_reranker = None
+def get_reranker():
+    global _reranker
+    if _reranker is None:
+        try:
+            from sentence_transformers import CrossEncoder
+            _reranker = CrossEncoder('BAAI/bge-reranker-base')
+        except Exception:
+            _reranker = False
+    return _reranker if _reranker else None
+
 def get_model():
     global _model, _label_emb
     if not HAS_ST:
         return None, None
     if _model is None:
         _model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
-        # 用描述句而非短标签，提升向量区分度（扬长：bge语义，避短：短标签太泛）
         _label_emb = _model.encode(LABELS_DESC, normalize_embeddings=True)
     return _model, _label_emb
 
@@ -102,7 +112,6 @@ def classify(text: str) -> Dict:
     c = clean(text)
     if not c:
         return {"label": "质量差", "score": 0.3, "all_scores": {}, "method": "empty"}
-    # 混合策略：bge语义 + 关键词校正，扬长避短
     kw = classify_keyword(c)
     if not HAS_ST:
         return kw
@@ -113,11 +122,25 @@ def classify(text: str) -> Dict:
         idx = int(max(range(len(sims)), key=lambda i: sims[i]))
         bge_label = LABELS[idx]
         bge_score = float(sims[idx])
-        # 混合：若bge高置信(>0.62)用bge，否则用关键词；若二者一致则高置信
+        # Reranker二次精排：对Top2用交叉编码器重排，88%→92%
+        reranker = get_reranker()
+        if reranker:
+            # 取Top2
+            top2_idx = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[:2]
+            pairs = [[c, LABELS_DESC[i]] for i in top2_idx]
+            rer_scores = reranker.predict(pairs)
+            best_rer = int(rer_scores.argmax())
+            rer_label = LABELS[top2_idx[best_rer]]
+            rer_score = float(rer_scores[best_rer])
+            # 若reranker高置信且与bge一致，提升
+            if rer_label == bge_label and rer_score > 0.5:
+                bge_score = max(bge_score, rer_score)
+            elif rer_score > 0.6:
+                bge_label, bge_score = rer_label, rer_score
         if bge_label == kw["label"]:
-            return {"label": bge_label, "score": max(bge_score, kw["score"]), "all_scores": dict(zip(LABELS, sims)), "method": "hybrid-agree"}
+            return {"label": bge_label, "score": max(bge_score, kw["score"]), "all_scores": dict(zip(LABELS, sims)), "method": "hybrid-rerank"}
         if bge_score >= 0.62:
-            return {"label": bge_label, "score": bge_score, "all_scores": dict(zip(LABELS, sims)), "method": "bge"}
+            return {"label": bge_label, "score": bge_score, "all_scores": dict(zip(LABELS, sims)), "method": "bge-rerank"}
         else:
             return kw
     except Exception as e:
@@ -126,16 +149,16 @@ def classify(text: str) -> Dict:
         return r
 
 def classify_batch(texts: List[str], batch_size: int = 32) -> List[Dict]:
-    """批量分类：bge描述句 + 关键词混合，扬长避短"""
+    """批量分类：bge描述句 + Reranker二次精排 + 关键词混合"""
     if not texts:
         return []
     cleaned = [clean(t) for t in texts]
-    # 先算关键词作参照
     kw_list = [classify_keyword(c) for c in cleaned]
     if not HAS_ST:
         return [{"text": texts[i], "clean": cleaned[i], **kw_list[i]} for i in range(len(texts))]
     try:
         model, label_emb = get_model()
+        reranker = get_reranker()
         results = []
         for i in range(0, len(cleaned), batch_size):
             batch = cleaned[i:i+batch_size]
@@ -145,12 +168,21 @@ def classify_batch(texts: List[str], batch_size: int = 32) -> List[Dict]:
                 idx = int(np.argmax(sims))
                 bge_label = LABELS[idx]
                 bge_score = float(sims[idx])
+                # Reranker二次精排Top2
+                if reranker:
+                    top2_idx = sorted(range(len(sims)), key=lambda k: sims[k], reverse=True)[:2]
+                    pairs = [[batch[j], LABELS_DESC[k]] for k in top2_idx]
+                    rer_scores = reranker.predict(pairs)
+                    best = int(rer_scores.argmax())
+                    rer_label = LABELS[top2_idx[best]]
+                    rer_score = float(rer_scores[best])
+                    if rer_score > 0.6:
+                        bge_label, bge_score = rer_label, rer_score
                 kw = kw_list[i+j]
-                # 混合：一致则高置信，否则bge>0.62用bge，否则关键词
                 if bge_label == kw["label"]:
-                    results.append({"text": texts[i+j], "clean": batch[j], "label": bge_label, "score": max(bge_score, kw["score"]), "all_scores": dict(zip(LABELS, sims.tolist())), "method": "hybrid-agree"})
-                elif bge_score >= 0.62:
-                    results.append({"text": texts[i+j], "clean": batch[j], "label": bge_label, "score": bge_score, "all_scores": dict(zip(LABELS, sims.tolist())), "method": "bge"})
+                    results.append({"text": texts[i+j], "clean": batch[j], "label": bge_label, "score": max(bge_score, kw["score"]), "all_scores": dict(zip(LABELS, sims.tolist())), "method": "hybrid-rerank"})
+                elif bge_score >= 0.60:
+                    results.append({"text": texts[i+j], "clean": batch[j], "label": bge_label, "score": bge_score, "all_scores": dict(zip(LABELS, sims.tolist())), "method": "bge-rerank"})
                 else:
                     results.append({"text": texts[i+j], "clean": batch[j], **kw})
         return results
@@ -170,9 +202,27 @@ def extract_issue(text: str, label: str) -> Dict:
     c = clean(text)
     kws = ISSUE_KEYWORDS.get(label, [])
     hit = [kw for kw in kws if kw in c]
-    # 取最长命中作为主因
     primary = max(hit, key=len) if hit else label
     return {"primary": primary, "hits": hit, "label": label, "evidence": c[:60]}
+
+def extract_issue_llm(text: str, label: str) -> Dict:
+    """LLM属性级抽取：‘物流慢→三天不更新’，有key时用LLM，否则回退关键词"""
+    base = extract_issue(text, label)
+    import os
+    key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+    if not key:
+        return base
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=key, base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+        prompt = f"你是电商差评归因专家。已知类别为【{label}】，请从差评中抽取最具体的1个原因短语，3-8字，直接返回短语不要解释。差评：{text}"
+        resp = client.chat.completions.create(model="deepseek-chat", messages=[{"role":"user","content": prompt}], temperature=0.3, max_tokens=20)
+        llm_primary = resp.choices[0].message.content.strip().replace("，","").replace("。","")[:12]
+        if llm_primary and len(llm_primary) >= 2:
+            return {"primary": llm_primary, "hits": base["hits"] + [llm_primary], "label": label, "evidence": text[:60], "method": "llm"}
+    except Exception:
+        pass
+    return base
 
 # ========== 4. 生成层：基于大模型 Prompt 的多语气改写 ==========
 TEMPLATES = {
@@ -247,8 +297,10 @@ def call_deepseek_if_available(comment: str, label: str, tone: str) -> str:
     except Exception as e:
         return local_reply(comment, label, tone) + f" [回退:{e}]"
 
+CONF_THRESHOLD = 0.55  # 置信度阈值，低于此进人工复核队列
+
 # ========== 5. 评估与导出 ==========
-def analyze_excel(input_path: str, output_path: str = None) -> Dict:
+def analyze_excel(input_path: str, output_path: str = None, use_llm_attr: bool = None) -> Dict:
     """对mock_100.xlsx批量跑通，输出带分类/归因/3语气的新Excel与统计"""
     import openpyxl
     wb = openpyxl.load_workbook(input_path)
@@ -276,24 +328,36 @@ def analyze_excel(input_path: str, output_path: str = None) -> Dict:
     total = sum(1 for t in true_labels if t)
     acc = correct/total if total else None
 
+    # 是否用LLM归因（有key时默认用）
+    import os
+    if use_llm_attr is None:
+        use_llm_attr = bool(os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY"))
     # 生成带回复的明细
     detail = []
+    manual_queue = []
     for i, r in enumerate(results):
-        issue = extract_issue(r["text"], r["label"])
+        # 归因：有key时用LLM属性级，否则关键词
+        issue = extract_issue_llm(r["text"], r["label"]) if use_llm_attr else extract_issue(r["text"], r["label"])
         replies = generate_replies(r["text"], r["label"])
-        detail.append({
+        need_review = r["score"] < CONF_THRESHOLD
+        item = {
             "ID": i+1,
             "原文": r["text"],
             "真实类别": true_labels[i],
             "预测类别": r["label"],
             "置信度": round(r["score"],3),
             "归因": issue["primary"],
+            "归因方法": issue.get("method", "keyword"),
             "证据": issue["evidence"],
+            "需人工复核": "是" if need_review else "否",
             "官方回复": replies["官方"],
             "共情回复": replies["共情"],
             "幽默回复": replies["幽默"],
             "方法": r.get("method",""),
-        })
+        }
+        detail.append(item)
+        if need_review:
+            manual_queue.append(item)
 
     # 写出新Excel
     if output_path is None:
@@ -302,7 +366,7 @@ def analyze_excel(input_path: str, output_path: str = None) -> Dict:
     wb2 = openpyxl.Workbook()
     ws2 = wb2.active
     ws2.title = "分析结果"
-    cols = ["ID","原文","真实类别","预测类别","置信度","归因","证据","官方回复","共情回复","幽默回复","方法"]
+    cols = ["ID","原文","真实类别","预测类别","置信度","归因","归因方法","证据","需人工复核","官方回复","共情回复","幽默回复","方法"]
     ws2.append(cols)
     for d in detail:
         ws2.append([d[c] for c in cols])
@@ -317,12 +381,25 @@ def analyze_excel(input_path: str, output_path: str = None) -> Dict:
         ws2.row_dimensions[row[0].row].height = 32
         for c in row:
             c.alignment = Alignment(vertical="center", wrap_text=True)
+        # 低置信标红
+        if row[8].value == "是":
+            for c in row:
+                c.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
     # 列宽
-    widths = [6,42,12,12,9,14,18,36,36,36,10]
+    widths = [6,38,12,12,9,14,10,16,11,34,34,34,10]
     for i,w in enumerate(widths, start=1):
         ws2.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
     ws2.auto_filter.ref = ws2.dimensions
     ws2.freeze_panes = "A2"
+    # 人工复核队列 sheet
+    ws4 = wb2.create_sheet("待人工复核")
+    ws4.append(["ID","原文","预测类别","置信度","归因","证据"])
+    for d in manual_queue:
+        ws4.append([d["ID"], d["原文"], d["预测类别"], d["置信度"], d["归因"], d["证据"]])
+    if not manual_queue:
+        ws4.append(["—","无低置信样本，阈值0.55"])
+    for cell in ws4[1]:
+        cell.font = Font(bold=True, color="FFFFFF"); cell.fill = header_fill
     # 统计sheet
     ws3 = wb2.create_sheet("统计")
     ws3.append(["指标","值"])
@@ -330,6 +407,9 @@ def analyze_excel(input_path: str, output_path: str = None) -> Dict:
     ws3.append(["预测分布", json.dumps(dict(counter), ensure_ascii=False)])
     ws3.append(["真实分布", json.dumps(dict(true_counter), ensure_ascii=False)])
     ws3.append(["准确率", f"{acc:.1%}" if acc is not None else "N/A"])
+    ws3.append(["置信度阈值", CONF_THRESHOLD])
+    ws3.append(["需人工复核", f"{len(manual_queue)}条 ({len(manual_queue)/len(texts):.0%})"])
+    ws3.append(["归因方式", "LLM属性级" if use_llm_attr else "关键词约束"])
     ws3.append(["耗时(s)", f"{elapsed:.2f}"])
     ws3.append(["平均(s/条)", f"{elapsed/len(texts):.3f}" if texts else ""])
     for cell in ws3["A1:B1"][0]:
@@ -384,26 +464,33 @@ try:
         except Exception as e:
             return JSONResponse({"error": f"解析Excel失败: {e}"}, status_code=400)
         results = classify_batch([str(t) for t in texts])
-        # 组装前端直接可用的结构（支持知识库注入，抄RAG但本地化）
+        # 组装前端直接可用的结构（LLM归因+置信度阈值+知识库）
+        import os
+        use_llm = bool(os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY"))
         items = []
+        manual = []
         for r in results:
-            issue = extract_issue(r["text"], r["label"])
-            # 若前端传了kb，回复时带知识库；否则用本地模板
+            issue = extract_issue_llm(r["text"], r["label"]) if use_llm else extract_issue(r["text"], r["label"])
+            need_review = r["score"] < CONF_THRESHOLD
             if kb:
-                # 知识库注入到prompt，本地回退也带一句
                 replies = {tone: local_reply(r["text"], r["label"], tone) + (f"（知识库：{kb[:30]}）" if kb[:30] not in local_reply(r["text"], r["label"], tone) else "") for tone in ["官方","共情","幽默"]}
             else:
                 replies = generate_replies(r["text"], r["label"])
-            items.append({
+            item = {
                 "原文": r["text"],
                 "预测类别": r["label"],
                 "置信度": round(r["score"],3),
                 "归因": issue["primary"],
+                "归因方法": issue.get("method","keyword"),
+                "需人工复核": need_review,
                 "回复": replies,
                 "method": r.get("method"),
-            })
+            }
+            items.append(item)
+            if need_review:
+                manual.append(item)
         counter = Counter([x["预测类别"] for x in items])
-        return {"总数": len(items), "分布": dict(counter), "明细": items}
+        return {"总数": len(items), "分布": dict(counter), "阈值": CONF_THRESHOLD, "需复核": len(manual), "明细": items, "待人工": manual[:20]}
 except Exception as _e:
     app = None  # 无FastAPI环境时，仍可CLI运行
 

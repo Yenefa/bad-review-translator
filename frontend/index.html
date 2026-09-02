@@ -134,6 +134,7 @@ label{font-size:13px;font-weight:500;color:var(--muted)}
       <canvas id="pie" height="190"></canvas>
       <div id="kpis" class="kpi" style="margin-top:10px;gap:8px"></div>
       <div id="top3" class="muted" style="margin-top:8px;font-size:12px"></div>
+      <div id="manualBox" class="muted" style="margin-top:10px;padding:8px;background:var(--accent-light);border-radius:8px;border:1px solid var(--accent);display:none"></div>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -219,6 +220,10 @@ function render(){
   // KPI
   const cnt={}; rows.forEach(r=>cnt[r.预测]=(cnt[r.预测]||0)+1);
   document.getElementById('kpis').innerHTML = LABELS.map(l=>`<div><div class="muted">${l}</div><b>${cnt[l]||0}</b></div>`).join("") + `<div><div class="muted">总数</div><b>${rows.length}</b></div>`;
+  // Top3 + 人工复核队列
+  const lowCnt = rows.filter(r=>r.score < 0.55).length;
+  const box=document.getElementById('manualBox');
+  if(lowCnt>0){ box.style.display='block'; box.innerHTML=`<b>⚠️ 待人工复核：</b>${lowCnt}条（置信<0.55，闭环越用越准） <span style="float:right">阈值0.55</span>`; } else { box.style.display='none'; };
   // Top3
   const issCnt={}; rows.forEach(r=>{ const k=r.归因; issCnt[k]=(issCnt[k]||0)+1; });
   const top3=Object.entries(issCnt).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>`${k}(${v})`).join(" · ");
